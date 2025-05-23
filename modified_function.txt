@@ -1,0 +1,11 @@
+    if(STSsid[0] != 0)
+    {
+      // Ignorar cualquier configuración WiFi almacenada
+      // No intentar conectarse a ninguna red WiFi externa
+      WiFi.mode(WIFI_AP);
+      
+#ifdef LOG_ENABLE
+      Serial.print(PSTR("Modo solo punto de acceso. Red WiFi guardada ignorada: "));
+      Serial.println(STSsid);
+#endif
+    }

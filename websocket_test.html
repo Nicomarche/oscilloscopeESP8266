@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>WebSocket Test for ESP8266 Oscilloscope</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .status { padding: 10px; margin: 10px 0; border-radius: 5px; }
+        .connected { background-color: #d4edda; color: #155724; }
+        .disconnected { background-color: #f8d7da; color: #721c24; }
+        button { padding: 10px 20px; margin: 5px; }
+        #log { height: 300px; overflow-y: scroll; border: 1px solid #ccc; padding: 10px; background: #f9f9f9; }
+    </style>
+</head>
+<body>
+    <h1>ESP8266 Oscilloscope WebSocket Test</h1>
+    
+    <div id="status" class="status disconnected">WebSocket: Disconnected</div>
+    
+    <div>
+        <button onclick="connect()">Connect</button>
+        <button onclick="disconnect()">Disconnect</button>
+        <button onclick="testAnalog()">Test Analog Request</button>
+        <button onclick="testDigital()">Test Digital Request</button>
+        <button onclick="clearLog()">Clear Log</button>
+    </div>
+    
+    <h3>Connection Log:</h3>
+    <div id="log"></div>
+    
+    <script>
+        let websocket = null;
+        
+        function log(message) {
+            const logDiv = document.getElementById('log');
+            const timestamp = new Date().toLocaleTimeString();
+            logDiv.innerHTML += `[${timestamp}] ${message}<br>`;
+            logDiv.scrollTop = logDiv.scrollHeight;
+        }
+        
+        function updateStatus(connected) {
+            const statusDiv = document.getElementById('status');
+            if (connected) {
+                statusDiv.textContent = 'WebSocket: Connected';
+                statusDiv.className = 'status connected';
+            } else {
+                statusDiv.textContent = 'WebSocket: Disconnected';
+                statusDiv.className = 'status disconnected';
+            }
+        }
+        
+        function connect() {
+            if (websocket && websocket.readyState === WebSocket.OPEN) {
+                log('Already connected');
+                return;
+            }
+            
+            // Use the current host but port 81 for WebSocket
+            const wsUrl = `ws://${window.location.hostname}:81/`;
+            log(`Connecting to ${wsUrl}`);
+            
+            websocket = new WebSocket(wsUrl);
+            
+            websocket.onopen = function(event) {
+                log('WebSocket connection opened');
+                updateStatus(true);
+            };
+            
+            websocket.onmessage = function(event) {
+                if (event.data instanceof Blob || event.data instanceof ArrayBuffer) {
+                    log(`Received binary data: ${event.data.size || event.data.byteLength} bytes`);
+                } else {
+                    log(`Received text: ${event.data}`);
+                }
+            };
+            
+            websocket.onclose = function(event) {
+                log(`WebSocket connection closed (code: ${event.code})`);
+                updateStatus(false);
+            };
+            
+            websocket.onerror = function(error) {
+                log(`WebSocket error: ${error}`);
+                updateStatus(false);
+            };
+        }
+        
+        function disconnect() {
+            if (websocket) {
+                websocket.close();
+                websocket = null;
+            }
+        }
+        
+        function testAnalog() {
+            if (!websocket || websocket.readyState !== WebSocket.OPEN) {
+                log('Not connected');
+                return;
+            }
+            
+            const message = {
+                cmd: 'getData',
+                mode: 0,  // analog
+                speed: 1, // 15ksps
+                trigger: 0
+            };
+            
+            log(`Sending analog request: ${JSON.stringify(message)}`);
+            websocket.send(JSON.stringify(message));
+        }
+        
+        function testDigital() {
+            if (!websocket || websocket.readyState !== WebSocket.OPEN) {
+                log('Not connected');
+                return;
+            }
+            
+            const message = {
+                cmd: 'getData',
+                mode: 1,  // digital
+                speed: 1, // 100ksps
+                trigger: 0
+            };
+            
+            log(`Sending digital request: ${JSON.stringify(message)}`);
+            websocket.send(JSON.stringify(message));
+        }
+        
+        function clearLog() {
+            document.getElementById('log').innerHTML = '';
+        }
+        
+        // Auto-connect on page load
+        window.addEventListener('load', function() {
+            log('Page loaded');
+            connect();
+        });
+    </script>
+</body>
+</html>
