@@ -188,8 +188,13 @@ function initWebSocket() {
         if (buf) prev.push(buf);
         buf = new Uint16Array(arrayBuffer);
         draw();
-        busy = false;
-        if (!hold) setTimeout(requestData, 100);
+        // busy is still true here from the initial requestData call
+        if (!hold) {
+          busy = false; // Allow next request
+          requestData(); // Request new data immediately
+        } else {
+          busy = false; // Clear busy flag if on hold, no new request
+        }
       };
       reader.readAsArrayBuffer(event.data instanceof Blob ? event.data : new Blob([event.data]));
     } else {
@@ -198,10 +203,23 @@ function initWebSocket() {
         const data = JSON.parse(event.data);
         if (data.type === 'connected') {
           console.log('WebSocket handshake complete');
-          if (!hold) setTimeout(requestData, 500);
+          $('wsStatus').textContent = 'WebSocket: Connected & Ready';
+          $('wsStatus').style.color = '#0A0'; // Green color for connected
+          if (!hold) {
+            busy = false; // Ensure not busy before first data request
+            requestData(); // Request data immediately
+          }
+        } else if (data.error) {
+          console.error('WebSocket server error:', data.error);
+          $('wsStatus').textContent = 'WebSocket Error: ' + data.error;
+          $('wsStatus').style.color = '#A00'; // Red color for error
+        } else {
+          console.log('Received unhandled text message:', data);
         }
       } catch (e) {
         console.error('Error parsing WebSocket message:', e);
+        $('wsStatus').textContent = 'WebSocket: Comms Error';
+        $('wsStatus').style.color = '#A00'; // Red color for error
       }
     }
   };

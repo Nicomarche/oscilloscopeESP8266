@@ -314,95 +314,125 @@ void userMainWebSocket(uint8_t clientNum)
 
   if (uiAppData[0] == 0) // analog
   {
-    if (uiAppData[2] == 1) // raising
+    bool trigger_acquired = false;
+    unsigned long t;
+
+    if (uiAppData[2] == 0) // No trigger
     {
-      unsigned long t = millis();
-
-      if (uiAppData[1] == 0)
+      trigger_acquired = true;
+    }
+    else if (uiAppData[2] == 1) // raising
+    {
+      t = millis();
+      if (uiAppData[1] == 0) // speed 0
       {
-        system_adc_read_fast(usBuff, 1, 16);
+        system_adc_read_fast(usBuff, 1, 16); // Initial read for usBuff[0]
         usBuff[0] += ADC_R_THR;
-
         while ((millis() - t) < 1000)
         {
-          system_adc_read_fast(usBuff + 1, 1, 16);
-
+          system_adc_read_fast(usBuff + 1, 1, 16); // Read current value into usBuff[1]
           if (usBuff[1] > usBuff[0])
-            goto __adc_start_ws;
+          {
+            trigger_acquired = true;
+            break; 
+          }
           else
-            usBuff[0] = usBuff[1] + ADC_R_THR;
-
+          {
+            usBuff[0] = usBuff[1] + ADC_R_THR; // Update threshold
+          }
           yield();
-        };
-
-        webSocket.sendBIN(clientNum, (uint8_t *)usBuff, 4);
-        return;
+        }
       }
-      else
+      else // speed non-0
       {
-        usBuff[0] = analogRead(ANALOG_CH_PIN) + ADC_R_THR;
-
+        usBuff[0] = analogRead(ANALOG_CH_PIN) + ADC_R_THR; // Initial read for usBuff[0]
         while ((millis() - t) < 1000)
         {
-          usBuff[1] = analogRead(ANALOG_CH_PIN);
-
+          usBuff[1] = analogRead(ANALOG_CH_PIN); // Read current value into usBuff[1]
           if (usBuff[1] > usBuff[0])
-            goto __adc_start_ws;
+          {
+            trigger_acquired = true;
+            break;
+          }
           else
-            usBuff[0] = usBuff[1] + ADC_R_THR;
-
+          {
+            usBuff[0] = usBuff[1] + ADC_R_THR; // Update threshold
+          }
           yield();
-        };
-
-        webSocket.sendBIN(clientNum, (uint8_t *)usBuff, 4);
-        return;
+        }
       }
     }
     else if (uiAppData[2] == 2) // falling
     {
-      unsigned long t = millis();
-
-      if (uiAppData[1] == 0)
+      t = millis();
+      if (uiAppData[1] == 0) // speed 0
       {
-        system_adc_read_fast(usBuff, 1, 16);
-
+        system_adc_read_fast(usBuff, 1, 16); // Initial read for usBuff[0]
+        // No ADC_F_THR adjustment for the initial usBuff[0] here as per original logic
         while ((millis() - t) < 1000)
         {
-          system_adc_read_fast(usBuff + 1, 1, 16);
-
+          system_adc_read_fast(usBuff + 1, 1, 16); // Read current value into usBuff[1]
           if ((usBuff[1] + ADC_F_THR) < usBuff[0])
-            goto __adc_start_ws;
+          {
+            trigger_acquired = true;
+            break;
+          }
           else
-            usBuff[0] = usBuff[1];
-
+          {
+            usBuff[0] = usBuff[1]; // Update reference
+          }
           yield();
-        };
-
-        webSocket.sendBIN(clientNum, (uint8_t *)usBuff, 4);
-        return;
+        }
       }
-      else
+      else // speed non-0
       {
-        usBuff[0] = analogRead(ANALOG_CH_PIN);
-
+        usBuff[0] = analogRead(ANALOG_CH_PIN); // Initial read for usBuff[0]
         while ((millis() - t) < 1000)
         {
-          usBuff[1] = analogRead(ANALOG_CH_PIN);
-
+          usBuff[1] = analogRead(ANALOG_CH_PIN); // Read current value into usBuff[1]
           if ((usBuff[1] + ADC_F_THR) < usBuff[0])
-            goto __adc_start_ws;
+          {
+            trigger_acquired = true;
+            break;
+          }
           else
-            usBuff[0] = usBuff[1];
-
+          {
+            usBuff[0] = usBuff[1]; // Update reference
+          }
           yield();
-        };
-
-        webSocket.sendBIN(clientNum, (uint8_t *)usBuff, 4);
-        return;
+        }
       }
     }
 
-  __adc_start_ws:
+    if (!trigger_acquired && uiAppData[2] != 0) // Trigger was required but not acquired (timed out)
+    {
+      // Determine which error message to log based on speed, matching previous specific messages
+      if (uiAppData[2] == 1) { // raising
+          if (uiAppData[1] == 0) {
+              if (!webSocket.sendBIN(clientNum, (uint8_t *)usBuff, 4)) {
+                Serial.printf("[%u] WebSocket sendBIN failed (analog, raising, speed 0, trigger timeout)\n", clientNum);
+              }
+          } else {
+              if (!webSocket.sendBIN(clientNum, (uint8_t *)usBuff, 4)) {
+                Serial.printf("[%u] WebSocket sendBIN failed (analog, raising, speed non-0, trigger timeout)\n", clientNum);
+              }
+          }
+      } else if (uiAppData[2] == 2) { // falling
+          if (uiAppData[1] == 0) {
+              if (!webSocket.sendBIN(clientNum, (uint8_t *)usBuff, 4)) {
+                Serial.printf("[%u] WebSocket sendBIN failed (analog, falling, speed 0, trigger timeout)\n", clientNum);
+              }
+          } else {
+              if (!webSocket.sendBIN(clientNum, (uint8_t *)usBuff, 4)) {
+                Serial.printf("[%u] WebSocket sendBIN failed (analog, falling, speed non-0, trigger timeout)\n", clientNum);
+              }
+          }
+      }
+      return;
+    }
+
+    // If trigger_acquired is true, or if uiAppData[2] == 0 (no trigger needed), proceed with data acquisition
+    // The label __adc_start_ws: is effectively replaced by this conditional execution path.
     if (uiAppData[1] == 0) // 70ksps
     {
       unsigned short usBuffer[512];
@@ -412,7 +442,10 @@ void userMainWebSocket(uint8_t clientNum)
       {
         yield();
         system_adc_read_fast(usBuffer, 512, 16);
-        webSocket.sendBIN(clientNum, (uint8_t *)usBuffer, 1024);
+        if (!webSocket.sendBIN(clientNum, (uint8_t *)usBuffer, 1024)) {
+          Serial.printf("[%u] WebSocket sendBIN failed during 70ksps analog stream, chunk %d\n", clientNum, i);
+          break; // Stop sending more chunks for this request
+        }
         yield();
       }
     }
@@ -442,7 +475,9 @@ void userMainWebSocket(uint8_t clientNum)
         }
       };
 
-      webSocket.sendBIN(clientNum, (uint8_t *)usBuffer, 1024);
+      if (!webSocket.sendBIN(clientNum, (uint8_t *)usBuffer, 1024)) {
+        Serial.printf("[%u] WebSocket sendBIN failed (analog, 15ksps)\n", clientNum);
+      }
     }
     else // if(uiAppData[1] == 2) //300sps
     {
@@ -471,49 +506,71 @@ void userMainWebSocket(uint8_t clientNum)
         }
       };
 
-      webSocket.sendBIN(clientNum, (uint8_t *)usBuffer, 128);
+      if (!webSocket.sendBIN(clientNum, (uint8_t *)usBuffer, 128)) {
+        Serial.printf("[%u] WebSocket sendBIN failed (analog, 300sps)\n", clientNum);
+      }
     }
   }
   else // digital
   {
-    if (uiAppData[2] == 1) // raising
-    {
-      unsigned long t = millis();
-      bool val1 = digitalRead(DIGITAL_CH_PIN), val2;
+    bool trigger_acquired = false;
+    unsigned long t;
+    bool val1, val2; // Declare val1, val2 here for wider scope if needed for timeout send
 
+    if (uiAppData[2] == 0) // No trigger
+    {
+      trigger_acquired = true;
+    }
+    else if (uiAppData[2] == 1) // raising
+    {
+      t = millis();
+      val1 = digitalRead(DIGITAL_CH_PIN); // Initial read for val1
       while ((millis() - t) < 1000)
       {
         val2 = val1;
         val1 = digitalRead(DIGITAL_CH_PIN);
         if (val1 == HIGH && val2 == LOW)
-          goto __dig_start_ws;
-
+        {
+          trigger_acquired = true;
+          break;
+        }
         yield();
-      };
-
-      webSocket.sendBIN(clientNum, (uint8_t *)usBuff, 4);
-      return;
+      }
     }
     else if (uiAppData[2] == 2) // falling
     {
-      unsigned long t = millis();
-      bool val1 = digitalRead(DIGITAL_CH_PIN), val2;
-
+      t = millis();
+      val1 = digitalRead(DIGITAL_CH_PIN); // Initial read for val1
       while ((millis() - t) < 1000)
       {
         val2 = val1;
         val1 = digitalRead(DIGITAL_CH_PIN);
         if (val1 == LOW && val2 == HIGH)
-          goto __dig_start_ws;
-
+        {
+          trigger_acquired = true;
+          break;
+        }
         yield();
-      };
-
-      webSocket.sendBIN(clientNum, (uint8_t *)usBuff, 4);
-      return;
+      }
     }
 
-  __dig_start_ws:
+    if (!trigger_acquired && uiAppData[2] != 0) // Trigger was required but not acquired (timed out)
+    {
+      // Determine which error message to log based on trigger type
+      if (uiAppData[2] == 1) { // raising
+          if (!webSocket.sendBIN(clientNum, (uint8_t *)usBuff, 4)) { // usBuff may contain stale data here, original code also sends it
+            Serial.printf("[%u] WebSocket sendBIN failed (digital, raising, trigger timeout)\n", clientNum);
+          }
+      } else if (uiAppData[2] == 2) { // falling
+          if (!webSocket.sendBIN(clientNum, (uint8_t *)usBuff, 4)) { // usBuff may contain stale data here
+            Serial.printf("[%u] WebSocket sendBIN failed (digital, falling, trigger timeout)\n", clientNum);
+          }
+      }
+      return;
+    }
+    
+    // If trigger_acquired is true, or if uiAppData[2] == 0 (no trigger needed), proceed with data acquisition
+    // The label __dig_start_ws: is effectively replaced by this conditional execution path.
     if (uiAppData[1] == 0) // 3msps
     {
       unsigned short usBuffer[512];
@@ -530,7 +587,9 @@ void userMainWebSocket(uint8_t clientNum)
       }
       yield();
 
-      webSocket.sendBIN(clientNum, (uint8_t *)usBuffer, 1024);
+      if (!webSocket.sendBIN(clientNum, (uint8_t *)usBuffer, 1024)) {
+        Serial.printf("[%u] WebSocket sendBIN failed (digital, 3msps)\n", clientNum);
+      }
     }
     else if (uiAppData[1] == 1) // 100ksps
     {
@@ -547,7 +606,9 @@ void userMainWebSocket(uint8_t clientNum)
           yield();
       }
 
-      webSocket.sendBIN(clientNum, (uint8_t *)usBuffer, 768);
+      if (!webSocket.sendBIN(clientNum, (uint8_t *)usBuffer, 768)) {
+        Serial.printf("[%u] WebSocket sendBIN failed (digital, 100ksps)\n", clientNum);
+      }
     }
     else // if(uiAppData[1] == 2) //3ksps
     {
@@ -564,7 +625,9 @@ void userMainWebSocket(uint8_t clientNum)
           yield();
       }
 
-      webSocket.sendBIN(clientNum, (uint8_t *)usBuffer, 128);
+      if (!webSocket.sendBIN(clientNum, (uint8_t *)usBuffer, 128)) {
+        Serial.printf("[%u] WebSocket sendBIN failed (digital, 3ksps)\n", clientNum);
+      }
     }
   }
 }
